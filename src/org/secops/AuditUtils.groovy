@@ -13,7 +13,3 @@ class AuditUtils implements Serializable {
         """
     }
 }
-
-def call(Map data) {
-    log(data)
-}
