@@ -1,8 +1,17 @@
-package org.secops
+import org.secops.AuditUtils
 
-class AuditUtils {
-    static void logApproval(String gate, String decision, String comments) {
-        println "[AUDIT] Gate=${gate} Decision=${decision}"
-        println "[AUDIT] Comments=${comments}"
+def call(Map config = [:]) {
+
+    AuditUtils.log(
+        gateName: config.gateName ?: 'UNKNOWN',
+        requiredRole: config.requiredRole ?: 'UNKNOWN'
+    )
+
+    timeout(time: 30, unit: 'MINUTES') {
+        input(
+            message: "Approve ${config.gateName}",
+            ok: "Approve",
+            submitter: config.requiredRole
+        )
     }
 }
