@@ -2,10 +2,11 @@ import org.secops.AuditUtils
 
 def call(Map config = [:]) {
 
-    AuditUtils.log(
-        gateName: config.gateName ?: 'UNKNOWN',
-        requiredRole: config.requiredRole ?: 'UNKNOWN'
-    )
+    AuditUtils.log(this, [
+        gateName: 'PRE_SCAN',
+        requiredRole: 'DevOps Engineer'
+    ])
+
 
     timeout(time: 30, unit: 'MINUTES') {
         input(
