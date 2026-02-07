@@ -2,16 +2,17 @@ import org.secops.StateStore
 import org.secops.AuditUtils
 
 def call(Map config = [:]) {
-    // Load previous stage state if exists
-    def state = StateStore.load(config.assessmentId) ?: [:]
-    
-    // Skip stage if already marked complete
-    if(state.stages?.get(config.stageName)?.status == 'PASSED') {
-        echo "[INFO] Stage '${config.stageName}' already completed, skipping..."
-        return
-    }
 
     node {
+        // Load previous stage state if exists
+        def state = StateStore.load(config.assessmentId) ?: [:]
+
+        // Skip stage if already marked complete
+        if(state.stages?.get(config.stageName)?.status == 'PASSED') {
+            echo "[INFO] Stage '${config.stageName}' already completed, skipping..."
+            return
+        }
+
         stage(config.stageName) {
             try {
                 // --- Approval Gate ---
@@ -24,7 +25,6 @@ def call(Map config = [:]) {
                 echo "[INFO] Running stage '${config.stageName}' for target ${config.target}"
 
                 // Placeholder: run your actual scan or assessment here
-                // e.g., SAST, DAST, Nmap, Dependency check, etc.
                 def findings = [:] // Collect findings here
 
                 // --- Findings Gate ---
