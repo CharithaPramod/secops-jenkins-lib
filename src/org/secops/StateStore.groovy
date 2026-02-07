@@ -1,46 +1,32 @@
+// StateStore.groovy
 package org.secops
-
-import groovy.json.JsonOutput
-import groovy.json.JsonSlurper
 
 class StateStore implements Serializable {
 
-    static String STATE_DIR = ".secops/state"
-    static String STATE_FILE = "${STATE_DIR}/assessment.json"
+    // Pass 'steps' from pipeline so fileExists/readJSON work
+    static def load(steps, String assessmentId) {
+        def filePath = ".secops/state/assessment.json"
 
-    static void init(def script) {
-        script.sh "mkdir -p ${STATE_DIR}"
-        if (!script.fileExists(STATE_FILE)) {
-            save(script, [
-                version: 1,
-                createdAt: new Date().toString(),
-                stages: [:]
-            ])
+        // Use pipeline step through 'steps'
+        if (steps.fileExists(filePath)) {
+            // read JSON using pipeline step
+            def jsonData = steps.readJSON(file: filePath)
+            steps.echo "Assessment state loaded for ID: ${assessmentId}"
+            return jsonData
+        } else {
+            steps.echo "No assessment state file found for ID: ${assessmentId}"
+            return null
         }
     }
 
-    static Map load(def script) {
-        if (!script.fileExists(STATE_FILE)) {
-            return [:]
-        }
-        return new JsonSlurper().parseText(
-            script.readFile(STATE_FILE)
-        ) as Map
-    }
+    static def save(steps, String assessmentId, Map data) {
+        def filePath = ".secops/state/assessment.json"
 
-    static void save(def script, Map state) {
-        script.sh "mkdir -p ${STATE_DIR}"
-        script.writeFile(
-            file: STATE_FILE,
-            text: JsonOutput.prettyPrint(JsonOutput.toJson(state))
-        )
-    }
+        // Ensure directory exists
+        steps.sh "mkdir -p .secops/state"
 
-    static void updateStage(def script, String stage, Map data) {
-        def state = load(script)
-        state.stages[stage] = data + [
-            updatedAt: new Date().toString()
-        ]
-        save(script, state)
+        // Write JSON using pipeline step
+        steps.writeJSON(file: filePath, json: data, pretty: 4)
+        steps.echo "Assessment state saved for ID: ${assessmentId}"
     }
 }

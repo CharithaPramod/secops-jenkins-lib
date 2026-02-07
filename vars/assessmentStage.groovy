@@ -5,7 +5,7 @@ def call(Map config = [:]) {
 
     node {
         // Load previous stage state if exists
-        def state = StateStore.load(config.assessmentId) ?: [:]
+        def state = StateStore.load(this)
 
         // Skip stage if already marked complete
         if(state.stages?.get(config.stageName)?.status == 'PASSED') {
@@ -40,7 +40,7 @@ def call(Map config = [:]) {
                     findings: findings,
                     completedAt: new Date().toString()
                 ]
-                StateStore.save(config.assessmentId, state)
+                StateStore.save(this, state)
 
                 // --- Optional: push to DefectDojo ---
                 echo "[INFO] Sending findings to DefectDojo (placeholder)"
@@ -53,7 +53,7 @@ def call(Map config = [:]) {
                     error: err.toString(),
                     completedAt: new Date().toString()
                 ]
-                StateStore.save(config.assessmentId, state)
+                StateStore.save(this, state)
 
                 error "[ERROR] Stage '${config.stageName}' failed: ${err}"
             }
