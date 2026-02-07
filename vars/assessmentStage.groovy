@@ -1,39 +1,27 @@
 import org.secops.StateStore
-import org.secops.AuditUtils
 
 def call(Map config = [:]) {
 
     node {
-        // Load previous stage state safely
         def assessmentId = config.assessmentId ?: "default-assessment"
         def state = StateStore.load(this, assessmentId)
         state.stages = state.stages ?: [:]
 
-        // Skip stage if already marked complete
+        // Skip if already passed
         if(state.stages[config.stageName]?.status == 'PASSED') {
-            echo "[INFO] Stage '${config.stageName}' already completed, skipping..."
+            echo "[INFO] Stage '${config.stageName}' already completed."
             return
         }
 
         stage(config.stageName) {
             try {
                 // --- Approval Gate ---
-                approvalGate(
-                    gateName: config.stageName + "_APPROVAL",
-                    requiredRole: config.requiredRole
-                )
+                input message: "Approve ${config.stageName}?", ok: "Approve"
 
-                // --- Stage Execution ---
-                echo "[INFO] Running stage '${config.stageName}' for target ${config.target}"
+                echo "[INFO] Running stage '${config.stageName}'"
 
-                // Placeholder: run your actual scan or assessment here
-                def findings = [:] // Collect findings here
-
-                // --- Findings Gate ---
-                findingsGate(
-                    gateName: config.stageName + "_FINDINGS",
-                    findings: findings
-                )
+                // --- Placeholder for actual scan ---
+                def findings = [:] // make sure this is a plain Map
 
                 // --- Save state safely ---
                 state.stages[config.stageName] = [
@@ -43,11 +31,8 @@ def call(Map config = [:]) {
                 ]
                 StateStore.save(this, assessmentId, state)
 
-                // --- Optional: push to DefectDojo ---
-                echo "[INFO] Sending findings to DefectDojo (placeholder)"
-
             } catch (err) {
-                // Mark stage as failed in state for retry/resume
+                // Mark failed safely
                 state.stages[config.stageName] = [
                     status: 'FAILED',
                     error: err.toString(),
