@@ -1,90 +1,79 @@
-import org.secops.FindingsUtils
-import org.secops.Severity
+import org.secops.StateStore
 import org.secops.AuditUtils
 
 def call(Map config = [:]) {
 
-    // ---- Validation ----
-    ['gateName', 'severityThreshold'].each {
-        if (!config[it]) {
-            error("findingsGate requires ${it}")
-        }
-    }
+    def script = this
 
-    def allowRiskAcceptance = config.allowRiskAcceptance ?: false
-    def riskApproverRole = config.riskApproverRole ?: 'Security Auditor'
+    def stageName   = config.stage ?: error("stage is required")
+    def maxRetries  = config.maxRetries ?: 2
+    def policy      = config.policy ?: [:]
 
-    // ---- Fetch findings ----
-    def findings = FindingsUtils.getFindings(config.gateName)
+    def state = StateStore.load(script)
+    def stage = state.stages[stageName] ?: [:]
 
-    AuditUtils.log(this, [
-        event: 'FINDINGS_EVALUATED',
-        gateName: config.gateName,
-        findings: findings
-    ])
+    int retryCount = stage.retryCount ?: 0
 
-    // ---- Check severity ----
-    if (!Severity.exceeds(findings.highestSeverity, config.severityThreshold)) {
-        echo "No blocking findings detected for ${config.gateName}"
-        return
-    }
+    // --- POLICY EVALUATION ---
+    boolean hasCritical = (stage.critical ?: 0) > 0
+    boolean requiresApproval = (stage.high ?: 0) > (policy.maxHigh ?: 5)
 
-    // ---- Findings detected → decision required ----
-    timeout(time: 3, unit: 'DAYS') {
+    if (hasCritical && retryCount < maxRetries) {
+        retryCount++
 
-        def choices = ['FIX_AND_RETRY']
-        if (allowRiskAcceptance) {
-            choices << 'ACCEPT_RISK'
-        }
-
-        def decision = input(
-            id: "${config.gateName}_FINDINGS",
-            message: """
-Findings detected in ${config.gateName}
-
-Highest severity : ${findings.highestSeverity}
-Threshold        : ${config.severityThreshold}
-Summary          : ${findings.summary}
-""",
-            ok: "Submit Decision",
-            parameters: [
-                choice(
-                    name: 'DECISION',
-                    choices: choices.join('\n'),
-                    description: 'Select how to proceed'
-                ),
-                text(
-                    name: 'JUSTIFICATION',
-                    description: 'Mandatory justification'
-                )
-            ]
-        )
-
-        // ---- Decision audit ----
-        AuditUtils.log(this, [
-            event: 'FINDINGS_DECISION',
-            gateName: config.gateName,
-            decision: decision.DECISION,
-            justification: decision.JUSTIFICATION
+        AuditUtils.log(script, [
+            event: 'GATE_RETRY',
+            stage: stageName,
+            retry: retryCount
         ])
 
-        if (decision.DECISION == 'FIX_AND_RETRY') {
-            error("Findings must be fixed before proceeding")
-        }
+        StateStore.updateStage(script, stageName, [
+            decision: 'RETRY',
+            retryCount: retryCount
+        ])
 
-        if (decision.DECISION == 'ACCEPT_RISK') {
+        error("${stageName} retry ${retryCount}/${maxRetries}")
 
-            // Role enforcement happens HERE
-            if (!currentBuild.rawBuild.getCause(hudson.model.Cause.UserIdCause)
-                    ?.userName) {
-                error("Unable to identify approving user")
-            }
-
-            AuditUtils.log(this, [
-                event: 'RISK_ACCEPTED',
-                gateName: config.gateName,
-                acceptedByRole: riskApproverRole
-            ])
-        }
     }
+
+    if (hasCritical && retryCount >= maxRetries) {
+
+        AuditUtils.log(script, [
+            event: 'GATE_FAIL',
+            stage: stageName
+        ])
+
+        StateStore.updateStage(script, stageName, [
+            decision: 'FAIL'
+        ])
+
+        error("${stageName} failed after ${retryCount} retries")
+    }
+
+    if (requiresApproval) {
+
+        AuditUtils.log(script, [
+            event: 'GATE_APPROVAL_REQUIRED',
+            stage: stageName
+        ])
+
+        timeout(time: 30, unit: 'MINUTES') {
+            input(
+                message: "Approve findings for ${stageName}",
+                ok: "Approve",
+                submitter: config.approver ?: 'DevOps Engineer'
+            )
+        }
+
+        StateStore.updateStage(script, stageName, [
+            decision: 'APPROVED'
+        ])
+    }
+
+    AuditUtils.log(script, [
+        event: 'GATE_PASS',
+        stage: stageName
+    ])
+
 }
+`
