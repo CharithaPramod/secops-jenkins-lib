@@ -1,32 +1,55 @@
-// StateStore.groovy
 package org.secops
+
+import groovy.transform.Field
 
 class StateStore implements Serializable {
 
-    // Pass 'steps' from pipeline so fileExists/readJSON work
-    static def load(steps, String assessmentId) {
-        def filePath = ".secops/state/assessment.json"
+    // Default state file path
+    @Field static String STATE_DIR = ".secops/state"
+    @Field static String STATE_FILE = "${STATE_DIR}/assessment.json"
 
-        // Use pipeline step through 'steps'
-        if (steps.fileExists(filePath)) {
-            // read JSON using pipeline step
-            def jsonData = steps.readJSON(file: filePath)
-            steps.echo "Assessment state loaded for ID: ${assessmentId}"
-            return jsonData
+    /**
+     * Load assessment state
+     * @param steps - pipeline steps object
+     * @param assessmentId - optional assessment identifier for logging
+     * @return Map of state or empty Map if file doesn't exist
+     */
+    static Map load(steps, String assessmentId = "") {
+        if (steps.fileExists(STATE_FILE)) {
+            def state = steps.readJSON(file: STATE_FILE)
+            steps.echo "[StateStore] Loaded assessment state for ID: ${assessmentId}"
+            return state as Map
         } else {
-            steps.echo "No assessment state file found for ID: ${assessmentId}"
-            return null
+            steps.echo "[StateStore] No state file found for ID: ${assessmentId}, initializing empty state"
+            return [version: 1, createdAt: new Date().toString(), stages: [:]]
         }
     }
 
-    static def save(steps, String assessmentId, Map data) {
-        def filePath = ".secops/state/assessment.json"
+    /**
+     * Save assessment state
+     * @param steps - pipeline steps object
+     * @param assessmentId - optional assessment identifier for logging
+     * @param state - Map containing current state
+     */
+    static void save(steps, String assessmentId = "", Map state) {
+        // Ensure state directory exists
+        steps.sh "mkdir -p ${STATE_DIR}"
 
-        // Ensure directory exists
-        steps.sh "mkdir -p .secops/state"
+        // Write state as JSON
+        steps.writeJSON(file: STATE_FILE, json: state, pretty: 4)
+        steps.echo "[StateStore] Saved assessment state for ID: ${assessmentId}"
+    }
 
-        // Write JSON using pipeline step
-        steps.writeJSON(file: filePath, json: data, pretty: 4)
-        steps.echo "Assessment state saved for ID: ${assessmentId}"
+    /**
+     * Update a specific stage in the state
+     * @param steps - pipeline steps object
+     * @param stageName - Name of the stage
+     * @param data - Map of stage details
+     */
+    static void updateStage(steps, String stageName, Map data) {
+        def state = load(steps)
+        state.stages = state.stages ?: [:]
+        state.stages[stageName] = data + [updatedAt: new Date().toString()]
+        save(steps, "", state)
     }
 }
