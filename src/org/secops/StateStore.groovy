@@ -1,18 +1,16 @@
 package org.secops
 
-import groovy.transform.Field
-
 class StateStore implements Serializable {
 
-    // Default state file path
-    @Field static String STATE_DIR = ".secops/state"
-    @Field static String STATE_FILE = "${STATE_DIR}/assessment.json"
+    // Default state directory and file
+    static String STATE_DIR = ".secops/state"
+    static String STATE_FILE = "${STATE_DIR}/assessment.json"
 
     /**
      * Load assessment state
      * @param steps - pipeline steps object
-     * @param assessmentId - optional assessment identifier for logging
-     * @return Map of state or empty Map if file doesn't exist
+     * @param assessmentId - optional ID for logging
+     * @return Map of state or empty initialized state
      */
     static Map load(steps, String assessmentId = "") {
         if (steps.fileExists(STATE_FILE)) {
@@ -28,14 +26,14 @@ class StateStore implements Serializable {
     /**
      * Save assessment state
      * @param steps - pipeline steps object
-     * @param assessmentId - optional assessment identifier for logging
+     * @param assessmentId - optional ID for logging
      * @param state - Map containing current state
      */
     static void save(steps, String assessmentId = "", Map state) {
         // Ensure state directory exists
         steps.sh "mkdir -p ${STATE_DIR}"
 
-        // Write state as JSON
+        // Write JSON using pipeline step
         steps.writeJSON(file: STATE_FILE, json: state, pretty: 4)
         steps.echo "[StateStore] Saved assessment state for ID: ${assessmentId}"
     }
