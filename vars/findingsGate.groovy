@@ -5,38 +5,64 @@ def call(Map config = [:]) {
 
     def script = this
 
-    def stageName   = config.stage ?: error("stage is required")
-    def maxRetries  = config.maxRetries ?: 2
-    def policy      = config.policy ?: [:]
+    String stageName   = config.stage ?: error("stage is required")
+    int maxRetries     = config.maxRetries ?: 2
+    Map policy         = config.policy ?: [:]
+    String approver    = config.approver ?: 'DevOps Engineer'
 
     def state = StateStore.load(script)
     def stage = state.stages[stageName] ?: [:]
 
-    int retryCount = stage.retryCount ?: 0
+    String existingDecision = stage.decision
 
-    // --- POLICY EVALUATION ---
-    boolean hasCritical = (stage.critical ?: 0) > 0
-    boolean requiresApproval = (stage.high ?: 0) > (policy.maxHigh ?: 5)
+    // --------------------------------------------------
+    // 1. RESUME / REPLAY SHORT-CIRCUIT
+    // --------------------------------------------------
+    if (existingDecision in ['APPROVED', 'PASS']) {
+        AuditUtils.log(script, [
+            event: 'GATE_RESUMED',
+            stage: stageName,
+            decision: existingDecision
+        ])
+        return
+    }
 
-    if (hasCritical && retryCount < maxRetries) {
-        retryCount++
+    if (existingDecision == 'FAIL') {
+        error("${stageName} previously failed and is locked")
+    }
+
+    int critical = stage.critical ?: 0
+    int high     = stage.high ?: 0
+    int retries  = stage.retryCount ?: 0
+
+    boolean hasCritical = critical > 0
+    boolean approvalRequired = high > (policy.maxHigh ?: 5)
+
+    // --------------------------------------------------
+    // 2. RETRY LOGIC
+    // --------------------------------------------------
+    if (hasCritical && retries < maxRetries) {
+
+        retries++
 
         AuditUtils.log(script, [
             event: 'GATE_RETRY',
             stage: stageName,
-            retry: retryCount
+            retry: retries
         ])
 
         StateStore.updateStage(script, stageName, [
             decision: 'RETRY',
-            retryCount: retryCount
+            retryCount: retries
         ])
 
-        error("${stageName} retry ${retryCount}/${maxRetries}")
-
+        error("${stageName} retry ${retries}/${maxRetries}")
     }
 
-    if (hasCritical && retryCount >= maxRetries) {
+    // --------------------------------------------------
+    // 3. HARD FAIL
+    // --------------------------------------------------
+    if (hasCritical && retries >= maxRetries) {
 
         AuditUtils.log(script, [
             event: 'GATE_FAIL',
@@ -47,10 +73,13 @@ def call(Map config = [:]) {
             decision: 'FAIL'
         ])
 
-        error("${stageName} failed after ${retryCount} retries")
+        error("${stageName} failed after ${retries} retries")
     }
 
-    if (requiresApproval) {
+    // --------------------------------------------------
+    // 4. HUMAN APPROVAL (ONCE ONLY)
+    // --------------------------------------------------
+    if (approvalRequired) {
 
         AuditUtils.log(script, [
             event: 'GATE_APPROVAL_REQUIRED',
@@ -58,22 +87,31 @@ def call(Map config = [:]) {
         ])
 
         timeout(time: 30, unit: 'MINUTES') {
-            input(
+            def approverUser = input(
                 message: "Approve findings for ${stageName}",
                 ok: "Approve",
-                submitter: config.approver ?: 'DevOps Engineer'
+                submitter: approver
             )
+
+            StateStore.updateStage(script, stageName, [
+                decision: 'APPROVED',
+                decisionBy: approverUser,
+                decisionAt: new Date().toString()
+            ])
         }
 
-        StateStore.updateStage(script, stageName, [
-            decision: 'APPROVED'
-        ])
+        return
     }
 
+    // --------------------------------------------------
+    // 5. AUTO PASS
+    // --------------------------------------------------
     AuditUtils.log(script, [
         event: 'GATE_PASS',
         stage: stageName
     ])
 
+    StateStore.updateStage(script, stageName, [
+        decision: 'PASS'
+    ])
 }
-`
