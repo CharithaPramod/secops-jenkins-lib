@@ -1,53 +1,48 @@
 package org.secops
 
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+
 class StateStore implements Serializable {
 
-    // Default state directory and file
-    static String STATE_DIR = ".secops/state"
-    static String STATE_FILE = "${STATE_DIR}/assessment.json"
+    // Load state from JSON file (convert LazyMap to plain Map)
+    static def load(steps, String assessmentId) {
+        def filePath = ".secops/state/assessment.json"
 
-    /**
-     * Load assessment state
-     * @param steps - pipeline steps object
-     * @param assessmentId - optional ID for logging
-     * @return Map of state or empty initialized state
-     */
-    static Map load(steps, String assessmentId = "") {
-        if (steps.fileExists(STATE_FILE)) {
-            def state = steps.readJSON(file: STATE_FILE)
+        if (steps.fileExists(filePath)) {
+            def jsonText = steps.readFile(filePath)
+            def jsonData = new JsonSlurper().parseText(jsonText)
             steps.echo "[StateStore] Loaded assessment state for ID: ${assessmentId}"
-            return state as Map
+
+            return deepCopyMap(jsonData) // Convert to serializable Map
         } else {
-            steps.echo "[StateStore] No state file found for ID: ${assessmentId}, initializing empty state"
-            return [version: 1, createdAt: new Date().toString(), stages: [:]]
+            steps.echo "[StateStore] No assessment state file found for ID: ${assessmentId}"
+            return [:] // Return empty Map
         }
     }
 
-    /**
-     * Save assessment state
-     * @param steps - pipeline steps object
-     * @param assessmentId - optional ID for logging
-     * @param state - Map containing current state
-     */
-    static void save(steps, String assessmentId = "", Map state) {
-        // Ensure state directory exists
-        steps.sh "mkdir -p ${STATE_DIR}"
+    // Save state to JSON file
+    static def save(steps, String assessmentId, Map data) {
+        def filePath = ".secops/state/assessment.json"
+        steps.sh "mkdir -p .secops/state"
 
-        // Write JSON using pipeline step
-        steps.writeJSON(file: STATE_FILE, json: state, pretty: 4)
+        def plainData = deepCopyMap(data)
+        def jsonText = JsonOutput.prettyPrint(JsonOutput.toJson(plainData))
+
+        steps.writeFile(file: filePath, text: jsonText)
         steps.echo "[StateStore] Saved assessment state for ID: ${assessmentId}"
     }
 
-    /**
-     * Update a specific stage in the state
-     * @param steps - pipeline steps object
-     * @param stageName - Name of the stage
-     * @param data - Map of stage details
-     */
-    static void updateStage(steps, String stageName, Map data) {
-        def state = load(steps)
-        state.stages = state.stages ?: [:]
-        state.stages[stageName] = data + [updatedAt: new Date().toString()]
-        save(steps, "", state)
+    // Recursively convert LazyMap/LazyList to plain Map/List
+    private static def deepCopyMap(obj) {
+        if (obj instanceof Map) {
+            def result = [:]
+            obj.each { k, v -> result[k] = deepCopyMap(v) }
+            return result
+        } else if (obj instanceof List) {
+            return obj.collect { deepCopyMap(it) }
+        } else {
+            return obj
+        }
     }
 }
